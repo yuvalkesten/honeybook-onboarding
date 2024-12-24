@@ -3,19 +3,32 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --honeybook-orange: #F06C5C;
+  --honeybook-black: #1D1D1D;
+  --honeybook-gray-light: #F7F7F7;
+  --honeybook-gray: #757575;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply bg-white text-[#1D1D1D];
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .btn-primary {
+    @apply bg-[#1D1D1D] text-white px-6 py-3 rounded-full font-medium hover:opacity-90 transition-opacity;
+  }
+  
+  .btn-secondary {
+    @apply bg-transparent text-[#1D1D1D] px-6 py-3 rounded-full font-medium border border-[#1D1D1D] hover:bg-gray-50 transition-colors;
+  }
+
+  .progress-bar {
+    @apply h-1 bg-[#F06C5C] rounded-full transition-all duration-300;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:border-[#F06C5C] transition-colors;
+  }
 }
