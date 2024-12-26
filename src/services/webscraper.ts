@@ -294,6 +294,12 @@ export class WebScraperService {
       if (!url || url.startsWith('#') || url.startsWith('javascript:') || url.startsWith('mailto:')) {
         return '';
       }
+
+      // Handle protocol-relative URLs (starting with //)
+      if (url.startsWith('//')) {
+        return new URL(`https:${url}`).href;
+      }
+
       const resolvedUrl = new URL(url, baseUrl);
       return resolvedUrl.href;
     } catch (error) {

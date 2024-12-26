@@ -1,28 +1,27 @@
 import { useState, useEffect } from 'react';
 import { IConversationMessage } from '@/types/onboarding';
-import { BusinessKnowledge } from '@/types/business';
-import { ConversationState } from '@/types/conversation';
+import { BusinessInfo } from '@/types/business';
 import ChatWindow from '../chat/ChatWindow';
 import BusinessKnowledgeSidebar from './BusinessKnowledgeSidebar';
 import Image from 'next/image';
 
-const initialKnowledge: BusinessKnowledge = {
+const initialBusinessInfo: BusinessInfo = {
+  name: null,
+  description: null,
   services: [],
+  location: null,
+  targetMarket: [],
   socialMedia: {},
+  yearsInBusiness: null,
+  painPoints: [],
+  goals: [],
   lastUpdated: new Date().toISOString(),
-  confidence: {},
-};
-
-const initialConversationState: ConversationState = {
-  stage: 'greeting',
-  businessInsights: {},
 };
 
 export default function OnboardingContainer(): JSX.Element {
   const [messages, setMessages] = useState<IConversationMessage[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [knowledge, setKnowledge] = useState<BusinessKnowledge>(initialKnowledge);
-  const [conversationState, setConversationState] = useState<ConversationState>(initialConversationState);
+  const [businessInfo, setBusinessInfo] = useState<BusinessInfo>(initialBusinessInfo);
 
   useEffect(() => {
     const initializeChat = async () => {
@@ -33,8 +32,7 @@ export default function OnboardingContainer(): JSX.Element {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            message: '__init__',
-            conversationState: initialConversationState,
+            messages: [],
           }),
         });
 
@@ -48,8 +46,8 @@ export default function OnboardingContainer(): JSX.Element {
           setMessages([initialMessage]);
         }
 
-        if (data.conversationState) {
-          setConversationState(data.conversationState);
+        if (data.businessInfo) {
+          setBusinessInfo(data.businessInfo);
         }
       } catch (error) {
         console.error('Failed to initialize chat:', error);
@@ -58,34 +56,6 @@ export default function OnboardingContainer(): JSX.Element {
 
     initializeChat();
   }, []);
-
-  useEffect(() => {
-    const updateKnowledge = async () => {
-      if (!conversationState.websiteContent) return;
-
-      try {
-        const response = await fetch('/api/knowledge', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            websiteContent: conversationState.websiteContent,
-            messages,
-          }),
-        });
-
-        const data = await response.json();
-        if (data.knowledge) {
-          setKnowledge(data.knowledge);
-        }
-      } catch (error) {
-        console.error('Failed to update knowledge:', error);
-      }
-    };
-
-    updateKnowledge();
-  }, [messages, conversationState.websiteContent]);
 
   const handleSendMessage = async (message: string) => {
     if (isLoading) return;
@@ -100,14 +70,18 @@ export default function OnboardingContainer(): JSX.Element {
     setIsLoading(true);
 
     try {
+      // Check if the message might be a URL
+      const urlRegex = /^(https?:\/\/)?([\da-z.-]+)\.([a-z.]{2,6})([/\w .-]*)*\/?$/;
+      const isUrl = urlRegex.test(message.trim());
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          message,
-          conversationState,
+          messages: [...messages, userMessage],
+          url: isUrl ? message.trim() : undefined,
         }),
       });
 
@@ -122,11 +96,17 @@ export default function OnboardingContainer(): JSX.Element {
         setMessages(prev => [...prev, assistantMessage]);
       }
 
-      if (data.conversationState) {
-        setConversationState(data.conversationState);
+      if (data.businessInfo) {
+        setBusinessInfo(data.businessInfo);
       }
     } catch (error) {
       console.error('Failed to send message:', error);
+      const errorMessage: IConversationMessage = {
+        role: 'assistant',
+        content: 'I apologize, but I encountered an error. Could you please try again?',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -151,7 +131,7 @@ export default function OnboardingContainer(): JSX.Element {
             isLoading={isLoading}
           />
         </div>
-        <BusinessKnowledgeSidebar knowledge={knowledge} />
+        <BusinessKnowledgeSidebar knowledge={businessInfo} />
       </div>
     </div>
   );

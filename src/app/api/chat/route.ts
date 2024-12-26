@@ -1,128 +1,117 @@
 import { NextResponse } from 'next/server';
-import { GPTService } from '@/services/gptService';
-import { ConversationState } from '@/types/conversation';
+import OpenAI from 'openai';
+import { BusinessAnalyzer } from '@/services/businessAnalyzer';
+import { IConversationMessage } from '@/types/onboarding';
 
-const STATIC_MESSAGES = {
-  greeting: "Hi! I'm your HoneyBook setup assistant. I'll help you streamline your business processes and set up HoneyBook to work perfectly for you. To get started, could you share your business website URL with me?",
-};
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-const urlRegex = /^(https?:\/\/)?([\da-z.-]+)\.([a-z.]{2,6})([/\w .-]*)*\/?$/;
+const businessAnalyzer = new BusinessAnalyzer(process.env.OPENAI_API_KEY || '');
+
+const INITIAL_MESSAGE = "Hi! I'm your HoneyBook setup assistant. I'll help you streamline your business processes and set up HoneyBook to work perfectly for you. To get started, could you share your business website URL with me?";
+
+const urlRegex = /^(https?:\/\/)?([\da-z.-]+)\.([a-z.]{2,6})([\w .-]*)*\/?$/;
 
 export async function POST(request: Request) {
   try {
-    const { message, conversationState } = await request.json();
-    
-    // Create a new GPT service instance for this request
-    const gptService = new GPTService(process.env.OPENAI_API_KEY || '');
+    const body = await request.json();
+    const messages = body.messages || [];
+    let url = body.url;
 
-    // If there's existing business info in the conversation state, restore it
-    if (conversationState?.businessInsights) {
-      gptService.updateBusinessInfo(conversationState.businessInsights);
-    }
-
-    // Handle initial load (no message or state)
-    if (!message && !conversationState) {
+    // Handle initial request with no messages
+    if (messages.length === 0) {
       return NextResponse.json({
-        message: STATIC_MESSAGES.greeting,
-        conversationState: {
-          stage: 'url_request',
-          websiteContent: '',
-          businessInsights: {},
-          hasScraped: false,
-        },
+        message: INITIAL_MESSAGE,
+        businessInfo: businessAnalyzer.getBusinessInfo(),
       });
     }
 
-    // Handle URL request stage
-    if (conversationState.stage === 'url_request') {
-      if (!urlRegex.test(message)) {
-        return NextResponse.json({
-          message: "That doesn't look like a valid website URL. Could you please share a URL starting with http:// or https://?",
-          conversationState,
-        });
+    // Check if the latest message might be a URL
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === 'user' && !url) {
+      const possibleUrl = lastMessage.content.trim();
+      if (urlRegex.test(possibleUrl)) {
+        url = possibleUrl;
       }
+    }
 
+    // If we have a URL in the latest message, try to scrape it
+    if (url) {
       try {
-        const scrapeResponse = await fetch(new URL('/api/scrape', request.url), {
+        const scrapeResponse = await fetch(new URL('/api/scrape', request.url).toString(), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: message }),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url }),
         });
 
-        const scrapeData = await scrapeResponse.json();
-
-        // Initialize business info with scraped data
-        if (scrapeData.analysis) {
-          gptService.updateBusinessInfo({
-            businessName: scrapeData.analysis.name,
-            services: scrapeData.analysis.services,
-            location: scrapeData.analysis.location,
+        if (!scrapeResponse.ok) {
+          console.error('Scrape failed:', await scrapeResponse.text());
+          return NextResponse.json({
+            message: "I had trouble accessing that website. Could you please verify the URL or tell me about your business directly?",
+            businessInfo: businessAnalyzer.getBusinessInfo(),
           });
         }
 
-        // Get current business info
-        const businessInfo = gptService.getBusinessInfo();
+        const { analysis: businessInfo } = await scrapeResponse.json();
         
-        // Start the conversation with a summary of what we know
-        const initialPrompt = `I've found some information about your business from your website. Let me confirm what I know:
-${businessInfo.businessName ? `- Your business name is ${businessInfo.businessName}` : ''}
-${businessInfo.services?.length ? `- You offer services including: ${businessInfo.services.join(', ')}` : ''}
-${businessInfo.location ? `- You're located in ${businessInfo.location}` : ''}
+        if (businessInfo) {
+          // Create a summary of what we found
+          let summary = "I've found some information about your business from your website. Let me confirm what I know:\n";
+          if (businessInfo.name) summary += `\n- Your business name is ${businessInfo.name}`;
+          if (businessInfo.services.length) summary += `\n- You offer services including: ${businessInfo.services.map(s => s.name).join(', ')}`;
+          if (businessInfo.location) summary += `\n- You're located in ${businessInfo.location}`;
+          summary += "\n\nIs this information correct? And could you tell me more about your business goals and what brings you to HoneyBook?";
 
-Let me ask about some details I couldn't find. ${gptService.getNextQuestion()}`;
-
-        return NextResponse.json({
-          message: initialPrompt,
-          conversationState: {
-            stage: 'business_analysis',
-            websiteContent: scrapeData.content || '',
-            businessInsights: businessInfo,
-            hasScraped: true,
-          },
-        });
-
+          return NextResponse.json({
+            message: summary,
+            businessInfo,
+          });
+        }
       } catch (error) {
-        console.error('Error during website analysis:', error);
+        console.error('Error during website scraping:', error);
         return NextResponse.json({
-          message: "I encountered an issue while analyzing your website. Would you like to tell me about your business directly?",
-          conversationState: {
-            stage: 'business_analysis',
-            websiteContent: '',
-            businessInsights: {},
-            hasScraped: true,
-          },
+          message: "I encountered an issue while analyzing your website. Could you tell me about your business directly?",
+          businessInfo: businessAnalyzer.getBusinessInfo(),
         });
       }
     }
 
-    // Handle business analysis stage
-    if (conversationState.stage === 'business_analysis') {
-      const response = await gptService.chat(message);
+    // Analyze the conversation for new insights
+    await businessAnalyzer.analyzeConversation(messages);
+    const businessInfo = businessAnalyzer.getBusinessInfo();
 
-      return NextResponse.json({
-        message: response,
-        conversationState: {
-          ...conversationState,
-          businessInsights: gptService.getBusinessInfo(),
+    // Get chat completion from GPT
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a friendly business assistant helping a business owner onboard to HoneyBook.
+          Use this business information to personalize your responses:
+          ${JSON.stringify(businessInfo, null, 2)}
+          
+          Keep your responses friendly, concise, and focused on understanding their business needs.
+          Ask questions to learn more about their business processes, challenges, and goals.`,
         },
-      });
-    }
+        ...messages,
+      ],
+      temperature: 0.7,
+    });
 
-    // Fallback - start over
+    const reply = completion.choices[0]?.message?.content || 'I apologize, but I am unable to respond at the moment.';
+
     return NextResponse.json({
-      message: STATIC_MESSAGES.greeting,
-      conversationState: {
-        stage: 'url_request',
-        websiteContent: '',
-        businessInsights: {},
-        hasScraped: false,
-      },
+      message: reply,
+      businessInfo,
     });
 
   } catch (error) {
-    console.error('Chat error:', error);
+    console.error('Error in chat endpoint:', error);
     return NextResponse.json(
-      { error: 'Failed to process message' },
+      { error: 'Failed to process request' },
       { status: 500 }
     );
   }

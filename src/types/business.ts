@@ -1,7 +1,6 @@
 export interface BusinessService {
-  title: string;
-  description: string;
-  imageUrl?: string;
+  name: string;
+  description?: string;
   price?: string;
 }
 
@@ -15,18 +14,17 @@ export interface SocialMediaLinks {
   website?: string;
 }
 
-export interface BusinessKnowledge {
-  businessName?: string;
-  yearsInBusiness?: number;
+export interface BusinessInfo {
+  name: string | null;
+  description: string | null;
   services: BusinessService[];
+  location: string | null;
+  targetMarket: string[];
   socialMedia: SocialMediaLinks;
+  yearsInBusiness: number | null;
+  painPoints: string[];
+  goals: string[];
   lastUpdated: string;
-  confidence: {
-    businessName?: number;
-    yearsInBusiness?: number;
-    services?: number;
-    socialMedia?: number;
-  };
 }
 
 export type KnowledgeExtractorType = 
